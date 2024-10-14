@@ -1,0 +1,1 @@
+- when working on nextjs applications, api routes should be written to route handlers per nextjs 14, which means they are like app/api/chat/route.ts or app/api/execute/route.ts

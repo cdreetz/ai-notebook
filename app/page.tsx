@@ -9,8 +9,13 @@ import ChatComponent from '@/components/ChatComponent';
 
 const NotebookPage: React.FC = () => {
   const [cells, setCells] = useState<Cell[]>([]);
+  const [notebooks, setNotebooks] = useState<string[]>([]);
+  const [currentNotebook, setCurrentNotebook] = useState<string>('');
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [newNotebookName, setNewNotebookName] = useState('');
 
   useEffect(() => {
+    fetchNotebooks();
     // Load cells from localStorage or start with a default cell
     const savedCells = localStorage.getItem('notebookCells');
     if (savedCells) {
@@ -24,6 +29,57 @@ const NotebookPage: React.FC = () => {
     // Save cells to localStorage whenever they change
     localStorage.setItem('notebookCells', JSON.stringify(cells));
   }, [cells]);
+
+  const fetchNotebooks = async () => {
+    try {
+      const response = await fetch('/api/filesystem');
+      if (response.ok) {
+        const notebookList = await response.json();
+        setNotebooks(notebookList);
+      } else {
+        console.error('Failed to fetch notebooks');
+      }
+    } catch (error) {
+      console.error('Error fetching notebooks:', error);
+    }
+  };
+
+  const saveNotebook = async () => {
+    if (newNotebookName) {
+      try {
+        const response = await fetch('/api/filesystem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: newNotebookName, content: cells }),
+        });
+        if (response.ok) {
+          setCurrentNotebook(newNotebookName);
+          fetchNotebooks();
+          setShowSaveDialog(false);
+          setNewNotebookName('');
+        } else {
+          console.error('Failed to save notebook');
+        }
+      } catch (error) {
+        console.error('Error saving notebook:', error);
+      }
+    }
+  };
+
+  const loadNotebook = async (filename: string) => {
+    try {
+      const response = await fetch(`/api/filesystem?filename=${filename}`);
+      if (response.ok) {
+        const loadedCells = await response.json();
+        setCells(loadedCells);
+        setCurrentNotebook(filename);
+      } else {
+        console.error('Failed to load notebook');
+      }
+    } catch (error) {
+      console.error('Error loading notebook:', error);
+    }
+  };
 
   const addCell = (type: CellType) => {
     setCells(prevCells => [...prevCells, { id: uuidv4(), type, content: '', output: '' }]);
@@ -86,30 +142,80 @@ const NotebookPage: React.FC = () => {
   };
 
   return (
-    <div className="bg-gray-100 text-gray-900 min-h-screen">
-      <nav className="bg-white border-b border-gray-300 p-4 sticky top-0 z-10">
+    <div className="flex flex-col h-screen overflow-hidden bg-gray-100 text-gray-900">
+      <nav className="bg-white border-b border-gray-300 p-4 z-10">
         <h1 className="text-2xl font-semibold">AI Notebook</h1>
-      </nav>
-      <div className="flex">
-        <div className="w-[70%] p-6">
-          <Toolbar onAddCell={addCell} />
-          {cells.map((cell, index) => (
-            <CellComponent
-              key={cell.id}
-              cell={cell}
-              index={index}
-              updateContent={updateCellContent}
-              executeCell={executeCell}
-              deleteCell={deleteCell}
-              moveCellUp={() => moveCellUp(index)}
-              moveCellDown={() => moveCellDown(index)}
-            />
-          ))}
+        <div className="mt-2 flex space-x-2">
+          <button
+            onClick={() => setShowSaveDialog(true)}
+            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+          >
+            Save Notebook
+          </button>
+          <select
+            onChange={(e) => loadNotebook(e.target.value)}
+            value={currentNotebook}
+            className="px-4 py-2 border rounded"
+          >
+            <option value="">Select a notebook</option>
+            {notebooks.map((notebook) => (
+              <option key={notebook} value={notebook}>
+                {notebook}
+              </option>
+            ))}
+          </select>
         </div>
-        <div className="w-[30%] border-l border-gray-300 h-[calc(100vh-64px)] overflow-hidden">
+      </nav>
+      <div className="flex flex-1 overflow-hidden">
+        <div className="w-[70%] p-6 overflow-y-auto">
+          <Toolbar onAddCell={addCell} />
+          <div className="space-y-4">
+            {cells.map((cell, index) => (
+              <CellComponent
+                key={cell.id}
+                cell={cell}
+                index={index}
+                updateContent={updateCellContent}
+                executeCell={executeCell}
+                deleteCell={deleteCell}
+                moveCellUp={() => moveCellUp(index)}
+                moveCellDown={() => moveCellDown(index)}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="w-[30%] border-l border-gray-300">
           <ChatComponent />
         </div>
       </div>
+      {showSaveDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg">
+            <h2 className="text-xl font-semibold mb-4">Save Notebook</h2>
+            <input
+              type="text"
+              value={newNotebookName}
+              onChange={(e) => setNewNotebookName(e.target.value)}
+              placeholder="Enter notebook name"
+              className="w-full p-2 border rounded mb-4"
+            />
+            <div className="flex justify-end space-x-2">
+              <button
+                onClick={() => setShowSaveDialog(false)}
+                className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={saveNotebook}
+                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
