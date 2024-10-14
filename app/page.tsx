@@ -1,101 +1,117 @@
-import Image from "next/image";
+'use client';
 
-export default function Home() {
+import React, { useState, useEffect } from 'react';
+import { v4 as uuidv4 } from 'uuid';
+import { Cell, CellType } from '@/types/notebook';
+import CellComponent from '@/components/CellComponent';
+import Toolbar from '@/components/Toolbar';
+import ChatComponent from '@/components/ChatComponent';
+
+const NotebookPage: React.FC = () => {
+  const [cells, setCells] = useState<Cell[]>([]);
+
+  useEffect(() => {
+    // Load cells from localStorage or start with a default cell
+    const savedCells = localStorage.getItem('notebookCells');
+    if (savedCells) {
+      setCells(JSON.parse(savedCells));
+    } else {
+      setCells([{ id: uuidv4(), type: 'code', content: '', output: '' }]);
+    }
+  }, []);
+
+  useEffect(() => {
+    // Save cells to localStorage whenever they change
+    localStorage.setItem('notebookCells', JSON.stringify(cells));
+  }, [cells]);
+
+  const addCell = (type: CellType) => {
+    setCells(prevCells => [...prevCells, { id: uuidv4(), type, content: '', output: '' }]);
+  };
+
+  const updateCellContent = (id: string, content: string) => {
+    setCells(prevCells => 
+      prevCells.map(cell => cell.id === id ? { ...cell, content } : cell)
+    );
+  };
+
+  const deleteCell = (id: string) => {
+    setCells(prevCells => prevCells.filter(cell => cell.id !== id));
+  };
+
+  const moveCellUp = (index: number) => {
+    if (index > 0) {
+      setCells(prevCells => {
+        const newCells = [...prevCells];
+        [newCells[index - 1], newCells[index]] = [newCells[index], newCells[index - 1]];
+        return newCells;
+      });
+    }
+  };
+
+  const moveCellDown = (index: number) => {
+    if (index < cells.length - 1) {
+      setCells(prevCells => {
+        const newCells = [...prevCells];
+        [newCells[index], newCells[index + 1]] = [newCells[index + 1], newCells[index]];
+        return newCells;
+      });
+    }
+  };
+
+  const executeCell = async (id: string) => {
+    const cell = cells.find(c => c.id === id);
+    if (cell && cell.type === 'code') {
+      try {
+        const response = await fetch('/api/execute', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: cell.content }),
+        });
+        const result = await response.json();
+        if (response.ok) {
+          setCells(prevCells => 
+            prevCells.map(c => c.id === id ? { ...c, output: result.output } : c)
+          );
+        } else {
+          throw new Error(result.error || 'Error executing cell');
+        }
+      } catch (error) {
+        console.error('Error executing cell:', error);
+        setCells(prevCells => 
+          prevCells.map(c => c.id === id ? { ...c, output: error instanceof Error ? error.message : 'Error executing cell' } : c)
+        );
+      }
+    }
+  };
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="https://nextjs.org/icons/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
-
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="https://nextjs.org/icons/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
+    <div className="bg-gray-100 text-gray-900 min-h-screen">
+      <nav className="bg-white border-b border-gray-300 p-4 sticky top-0 z-10">
+        <h1 className="text-2xl font-semibold">AI Notebook</h1>
+      </nav>
+      <div className="flex">
+        <div className="w-[70%] p-6">
+          <Toolbar onAddCell={addCell} />
+          {cells.map((cell, index) => (
+            <CellComponent
+              key={cell.id}
+              cell={cell}
+              index={index}
+              updateContent={updateCellContent}
+              executeCell={executeCell}
+              deleteCell={deleteCell}
+              moveCellUp={() => moveCellUp(index)}
+              moveCellDown={() => moveCellDown(index)}
             />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+          ))}
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="https://nextjs.org/icons/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        <div className="w-[30%] border-l border-gray-300 h-[calc(100vh-64px)] overflow-hidden">
+          <ChatComponent />
+        </div>
+      </div>
     </div>
   );
-}
+};
+
+export default NotebookPage;
