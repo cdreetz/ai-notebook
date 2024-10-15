@@ -144,26 +144,28 @@ const NotebookPage: React.FC = () => {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-gray-100 text-gray-900">
       <nav className="bg-white border-b border-gray-300 p-4 z-10">
-        <h1 className="text-2xl font-semibold">AI Notebook</h1>
-        <div className="mt-2 flex space-x-2">
-          <button
-            onClick={() => setShowSaveDialog(true)}
-            className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
-          >
-            Save Notebook
-          </button>
-          <select
-            onChange={(e) => loadNotebook(e.target.value)}
-            value={currentNotebook}
-            className="px-4 py-2 border rounded"
-          >
-            <option value="">Select a notebook</option>
-            {notebooks.map((notebook) => (
-              <option key={notebook} value={notebook}>
-                {notebook}
-              </option>
-            ))}
-          </select>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-semibold">AI Notebook</h1>
+          <div className="flex space-x-2">
+            <button
+              onClick={() => setShowSaveDialog(true)}
+              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+            >
+              Save Notebook
+            </button>
+            <select
+              onChange={(e) => loadNotebook(e.target.value)}
+              value={currentNotebook}
+              className="px-4 py-2 border rounded"
+            >
+              <option value="">Select a notebook</option>
+              {notebooks.map((notebook) => (
+                <option key={notebook} value={notebook}>
+                  {notebook}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </nav>
       <div className="flex flex-1 overflow-hidden">

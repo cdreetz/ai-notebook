@@ -5,6 +5,7 @@ import { useChat } from 'ai/react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import type { SyntaxHighlighterProps } from 'react-syntax-highlighter';
 
 const ChatComponent: React.FC = () => {
   const { messages, input, handleInputChange, handleSubmit } = useChat({
@@ -28,7 +29,7 @@ const ChatComponent: React.FC = () => {
                     const match = /language-(\w+)/.exec(className || '')
                     return !inline && match ? (
                       <SyntaxHighlighter
-                        {...props}
+                        {...props as SyntaxHighlighterProps}
                         style={atomDark}
                         language={match[1]}
                         PreTag="div"
