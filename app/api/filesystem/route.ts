@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// In-memory storage for notebooks
-let notebooks: { [key: string]: any } = {};
+// Define interface for notebook content
+interface NotebookContent {
+  content: string;
+}
+
+// In-memory storage for notebooks with specific type
+const notebooks: Record<string, NotebookContent> = {};
 
 export async function GET(request: NextRequest) {
   const filename = request.nextUrl.searchParams.get('filename');
@@ -20,6 +25,13 @@ export async function POST(request: NextRequest) {
     notebooks[filename] = content;
     return NextResponse.json({ message: 'Notebook saved successfully' });
   } catch (error) {
-    return NextResponse.json({ error: 'Error saving notebook' }, { status: 500 });
+    console.error('Error saving notebook:', error);
+    let errorMessage = 'Error saving notebook';
+    if (error instanceof Error) {
+      errorMessage = error.message;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    }
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

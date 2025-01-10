@@ -1,16 +1,41 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useChat } from 'ai/react';
-import ReactMarkdown from 'react-markdown';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { atomDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import type { SyntaxHighlighterProps } from 'react-syntax-highlighter';
+import { CodeBlock } from './CodeBlock';
 
-const ChatComponent: React.FC = () => {
-  const { messages, input, handleInputChange, handleSubmit } = useChat({
-    keepLastMessageOnError: true,
-  });
+interface ChatComponentProps {
+  contextToAdd: string | null;
+  clearContext: () => void;
+}
+
+const ChatComponent: React.FC<ChatComponentProps> = ({ contextToAdd, clearContext }) => {
+  const { messages, input, handleInputChange, handleSubmit, setMessages } = useChat();
+  const [context, setContext] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (contextToAdd) {
+      setMessages([
+        ...messages,
+        {
+          id: Math.random().toString(),
+          role: 'system',
+          content: `\`\`\`${contextToAdd.startsWith('Code:') ? 'python' : ''}\n${contextToAdd}\n\`\`\``,
+          createdAt: new Date(),
+        }
+      ]);
+      clearContext();
+    }
+  }, [contextToAdd, clearContext, messages, setMessages]);
+
+  const handleFormSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const messageContent = context 
+      ? `Additional Context: ${context}\n\nUser: ${input}`
+      : input;
+    handleSubmit(e, { options: { body: { input: messageContent } } });
+    setContext(null);
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -19,45 +44,52 @@ const ChatComponent: React.FC = () => {
       </div>
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((message) => (
-          <div key={message.id} className={`${message.role === 'user' ? 'text-right' : 'text-left'}`}>
-            <div className={`inline-block p-2 rounded-lg ${
-              message.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-200 text-gray-800'
+          <div key={message.id} className={`${
+            message.role === 'user' 
+              ? 'text-right' 
+              : message.role === 'system' 
+                ? 'text-left bg-gray-100 p-2 rounded-lg border border-gray-300' 
+                : 'text-left'
+          }`}>
+            {message.role === 'system' && (
+              <div className="text-xs text-gray-500 mb-1">Added to conversation:</div>
+            )}
+            <div className={`inline-block p-2 rounded-lg max-w-full ${
+              message.role === 'user' 
+                ? 'bg-blue-500 text-white' 
+                : message.role === 'system'
+                  ? 'bg-gray-100'
+                  : 'bg-gray-200 text-gray-800'
             }`}>
-              <ReactMarkdown
-                components={{
-                  code({node, inline, className, children, ...props}) {
-                    const match = /language-(\w+)/.exec(className || '')
-                    return !inline && match ? (
-                      <SyntaxHighlighter
-                        {...props as SyntaxHighlighterProps}
-                        style={atomDark}
-                        language={match[1]}
-                        PreTag="div"
+              <div className="w-full overflow-x-auto">
+                {message.content.split('```').map((block, index) => {
+                  if (index % 2 === 1) {  // Code block
+                    const [lang, ...code] = block.split('\n');
+                    return (
+                      <CodeBlock
+                        key={index}
+                        inline={false}
+                        className={`language-${lang}`}
                       >
-                        {String(children).replace(/\n$/, '')}
-                      </SyntaxHighlighter>
-                    ) : (
-                      <code {...props} className={inline ? 'bg-gray-700 text-white px-1 py-0.5 rounded' : className}>
-                        {children}
-                      </code>
-                    )
+                        {code.join('\n')}
+                      </CodeBlock>
+                    );
                   }
-                }}
-              >
-                {message.content}
-              </ReactMarkdown>
+                  return <p key={index}>{block}</p>;  // Regular text
+                })}
+              </div>
             </div>
           </div>
         ))}
       </div>
       <div className="p-4 border-t">
-        <form onSubmit={handleSubmit} className="flex space-x-2">
+        <form onSubmit={handleFormSubmit} className="flex space-x-2">
           <input
             type="text"
             value={input}
             onChange={handleInputChange}
             className="flex-1 p-2 border rounded-lg"
-            placeholder="Type your message..."
+            placeholder={contextToAdd ? "Ask about the added context..." : "Type your message..."}
           />
           <button
             type="submit"

@@ -1,7 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['fs'],
+  webpack: (config) => {
+    config.resolve.fallback = {
+      ...config.resolve.fallback,
+      child_process: false,
+      fs: false,
+      'fs/promises': false,
+      path: false,
+    };
+    return config;
   },
 }
 
