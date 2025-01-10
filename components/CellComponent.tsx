@@ -6,7 +6,6 @@ import { EditorView } from '@codemirror/view';
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import { Cell } from '@/types/notebook';
 import { ArrowRightCircleIcon } from '@heroicons/react/24/outline';
-import Image from 'next/image';
 
 interface CellComponentProps {
   cell: Cell;
@@ -33,7 +32,7 @@ const CellComponent: React.FC<CellComponentProps> = ({
     // Check if the output is a base64 image (matplotlib output)
     if (output.includes('data:image/png;base64,')) {
       return (
-        <Image 
+        <img 
           src={output} 
           alt="Plot output" 
           className="max-w-full h-auto my-2"

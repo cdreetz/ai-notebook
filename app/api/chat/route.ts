@@ -9,7 +9,7 @@ export async function POST(req: Request) {
 
   const result = await streamText({
     model: openai('gpt-4o'),
-    system: 'You are a helpful assistant.',
+    system: 'You are a helpful assistant as part of an AI notebook running in the browser. We are using the pyodide library to run python code and have access to the matplotlib, numpy, and networkx libraries.',
     messages: convertToCoreMessages(messages),
   });
 

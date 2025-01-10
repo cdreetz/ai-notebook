@@ -14,7 +14,7 @@ interface CodeBlockProps {
 export function CodeBlock({ inline, className, children }: CodeBlockProps) {
   if (inline) {
     return (
-      <code className="text-sm bg-gray-700 text-white px-1 py-0.5 rounded">
+      <code className="text-sm bg-gray-700 text-white px-1 py-0.5 rounded inline-block">
         {children}
       </code>
     );
