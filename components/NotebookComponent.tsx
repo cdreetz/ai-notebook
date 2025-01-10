@@ -7,8 +7,11 @@ import CellComponent from '@/components/CellComponent';
 import Toolbar from '@/components/Toolbar';
 import ChatComponent from '@/components/ChatComponent';
 import { executePythonInBrowser } from '@/utils/pyodideWorker';
+import { useTheme } from '@/contexts/ThemeContext';
+import { SunIcon, MoonIcon } from '@heroicons/react/24/outline';
 
 const NotebookComponent: React.FC = () => {
+  const { theme, toggleTheme } = useTheme();
   const [cells, setCells] = useState<Cell[]>([]);
   const [notebooks, setNotebooks] = useState<string[]>([]);
   const [currentNotebook, setCurrentNotebook] = useState<string>('');
@@ -157,22 +160,47 @@ const NotebookComponent: React.FC = () => {
     setChatContext(null);
   };
 
+  const themeStyles = {
+    background: theme === 'dark' ? 'bg-[#1a1a1a]' : 'bg-white',
+    nav: theme === 'dark' ? 'bg-[#242424] border-[#333333]' : 'bg-gray-100 border-gray-200',
+    text: theme === 'dark' ? 'text-gray-100' : 'text-gray-900',
+    border: theme === 'dark' ? 'border-[#333333]' : 'border-gray-200',
+    input: theme === 'dark' ? 'bg-[#1a1a1a] border-[#333333]' : 'bg-white border-gray-200',
+    cell: theme === 'dark' ? 'bg-[#242424]' : 'bg-gray-50',
+  };
+
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-gray-100 text-gray-900">
-      <nav className="bg-white border-b border-gray-300 p-4 z-10">
+    <div className={`flex flex-col h-screen overflow-hidden ${themeStyles.background} ${themeStyles.text}`}>
+      <nav className={`border-b p-4 z-10 ${themeStyles.nav}`}>
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold">AI Notebook</h1>
-          <div className="flex space-x-2">
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={toggleTheme}
+              className={`p-2 rounded-lg hover:bg-opacity-80 transition-colors ${
+                theme === 'dark' ? 'bg-[#333333]' : 'bg-gray-200'
+              }`}
+            >
+              {theme === 'dark' ? (
+                <SunIcon className="h-5 w-5" />
+              ) : (
+                <MoonIcon className="h-5 w-5" />
+              )}
+            </button>
             <button
               onClick={() => setShowSaveDialog(true)}
-              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
+              className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 transition-colors"
             >
               Save Notebook
             </button>
             <select
               onChange={(e) => loadNotebook(e.target.value)}
               value={currentNotebook}
-              className="px-4 py-2 border rounded"
+              className={`px-4 py-2 border rounded focus:ring-2 focus:ring-emerald-500 focus:border-transparent ${
+                theme === 'dark' 
+                  ? 'bg-[#2a2a2a] border-[#333333]' 
+                  : 'bg-white border-gray-200'
+              }`}
             >
               <option value="">Select a notebook</option>
               {notebooks.map((notebook) => (
@@ -203,31 +231,31 @@ const NotebookComponent: React.FC = () => {
             ))}
           </div>
         </div>
-        <div className="w-[30%] border-l border-gray-300">
+        <div className="w-[30%] border-gray-200">
           <ChatComponent contextToAdd={chatContext} clearContext={clearChatContext} />
         </div>
       </div>
       {showSaveDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white p-6 rounded-lg">
-            <h2 className="text-xl font-semibold mb-4">Save Notebook</h2>
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center">
+          <div className="bg-[#242424] p-6 rounded-lg border border-[#333333] shadow-xl">
+            <h2 className="text-xl font-semibold mb-4 text-white">Save Notebook</h2>
             <input
               type="text"
               value={newNotebookName}
               onChange={(e) => setNewNotebookName(e.target.value)}
               placeholder="Enter notebook name"
-              className="w-full p-2 border rounded mb-4"
+              className="w-full p-2 bg-[#1a1a1a] border border-[#333333] rounded mb-4 text-white placeholder-gray-400 focus:ring-2 focus:ring-emerald-500 focus:border-transparent"
             />
             <div className="flex justify-end space-x-2">
               <button
                 onClick={() => setShowSaveDialog(false)}
-                className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400 transition-colors"
+                className="px-4 py-2 bg-gray-700 text-white rounded hover:bg-gray-600 transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={saveNotebook}
-                className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+                className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 transition-colors"
               >
                 Save
               </button>
