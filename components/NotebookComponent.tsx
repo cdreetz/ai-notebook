@@ -9,6 +9,7 @@ import ChatComponent from '@/components/ChatComponent';
 import { executePythonInBrowser } from '@/utils/pyodideWorker';
 import { useTheme } from '@/contexts/ThemeContext';
 import { SunIcon, MoonIcon } from '@heroicons/react/24/outline';
+import { NotebookWebSocket } from '@/app/lib/websocket';
 
 const NotebookComponent: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
@@ -18,6 +19,8 @@ const NotebookComponent: React.FC = () => {
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [newNotebookName, setNewNotebookName] = useState('');
   const [chatContext, setChatContext] = useState<string | null>(null);
+  const [wsClient, setWsClient] = useState<NotebookWebSocket | null>(null);
+  const [executingCellId, setExecutingCellId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchNotebooks();
@@ -43,6 +46,50 @@ const NotebookComponent: React.FC = () => {
 
     loadPyodideScript();
   }, []);
+
+  useEffect(() => {
+    const client = new NotebookWebSocket();
+    
+    client.onExecutionResult((result) => {
+      setCells(prevCells => 
+        prevCells.map(cell => {
+          if (cell.id === executingCellId) {
+            return {
+              ...cell,
+              output: result.status === 'success' ? result.output : result.error
+            };
+          }
+          return cell;
+        })
+      );
+    });
+    
+    setWsClient(client);
+    
+    return () => {
+      if (client) {
+        client.close();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (wsClient && executingCellId) {
+      wsClient.onExecutionResult((result) => {
+        setCells(prevCells => 
+          prevCells.map(cell => {
+            if (cell.id === executingCellId) {
+              return {
+                ...cell,
+                output: result.status === 'success' ? result.output : result.error
+              };
+            }
+            return cell;
+          })
+        );
+      });
+    }
+  }, [executingCellId]);
 
   const fetchNotebooks = async () => {
     try {
@@ -131,23 +178,14 @@ const NotebookComponent: React.FC = () => {
 
   const executeCell = async (id: string) => {
     const cell = cells.find(c => c.id === id);
-    if (cell && cell.type === 'code') {
-      try {
-        const result = await executePythonInBrowser(cell.content);
-        
-        if (result.error) {
-          throw new Error(result.error);
-        }
-
-        setCells(prevCells => 
-          prevCells.map(c => c.id === id ? { ...c, output: result.output || '' } : c)
-        );
-      } catch (error) {
-        console.error('Error executing cell:', error);
-        setCells(prevCells => 
-          prevCells.map(c => c.id === id ? { ...c, output: error instanceof Error ? error.message : 'Error executing cell' } : c)
-        );
-      }
+    if (cell && cell.type === 'code' && wsClient) {
+      setExecutingCellId(id);
+      
+      setCells(prevCells =>
+        prevCells.map(c => c.id === id ? { ...c, output: 'Executing...' } : c)
+      );
+      
+      wsClient.executeCode(cell.content);
     }
   };
 

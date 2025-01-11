@@ -71,9 +71,7 @@ OPENAI_API_KEY=your_api_key_here
 
 4. Start the development server:
 ```bash
-npm run dev
-# or
-yarn dev
+npm run dev-all
 ```
 
 5. Open [http://localhost:3000](http://localhost:3000) in your browser to start using AI Notebook.

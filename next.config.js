@@ -10,6 +10,14 @@ const nextConfig = {
     };
     return config;
   },
-}
+  async rewrites() {
+    return [
+      {
+        source: '/ws',
+        destination: 'http://localhost:3001',
+      },
+    ];
+  },
+};
 
-module.exports = nextConfig
+module.exports = nextConfig;
