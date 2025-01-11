@@ -226,9 +226,8 @@ const CellComponent: React.FC<CellComponentProps> = ({
       </div>
       
       {showPromptDialog && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-[#242424] p-6 rounded-lg border border-[#333333] w-[500px]">
-            <h3 className="text-lg font-semibold mb-4">Generate Code</h3>
+        <div className="absolute left-0 right-8 mt-2 z-10">
+          <div className="bg-[#242424] p-4 rounded-lg border border-[#333333] w-full">
             <form onSubmit={handlePromptSubmit}>
               <input
                 type="text"
