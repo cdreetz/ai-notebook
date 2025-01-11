@@ -6,7 +6,13 @@ export async function POST(req: Request) {
 
   const result = await streamText({
     model: openai('gpt-4'),
-    system: 'You are a helpful coding assistant. Generate only the code requested, without any explanation or markdown formatting. Do not include any other text or comments. Your output will be passed directly as VALID CODE.',
+    system: `
+      You are a helpful coding assistant.
+      Generate only the code requested, without any explanation or markdown formatting.
+      Do not include any other text or comments.
+      Your output will be passed directly as VALID CODE.
+      Don't even include the backticks in your response. 
+    `,
     prompt: prompt,
   });
 

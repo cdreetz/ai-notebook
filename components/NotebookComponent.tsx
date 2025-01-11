@@ -11,10 +11,16 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { SunIcon, MoonIcon } from '@heroicons/react/24/outline';
 import { NotebookWebSocket } from '@/app/lib/websocket';
 import PackageManager from '@/components/PackageManager';
+import NotebookContext from '@/components/NotebookContext';
 
 const NotebookComponent: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
-  const [cells, setCells] = useState<Cell[]>([]);
+  const [cells, setCells] = useState<Cell[]>([{ 
+    id: uuidv4(), 
+    type: 'code', 
+    content: '', 
+    output: '' 
+  }]);
   const [notebooks, setNotebooks] = useState<string[]>([]);
   const [currentNotebook, setCurrentNotebook] = useState<string>('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
@@ -24,9 +30,38 @@ const NotebookComponent: React.FC = () => {
   const [executingCellId, setExecutingCellId] = useState<string | null>(null);
   const [packageManagerOpen, setPackageManagerOpen] = useState(false);
   const [showPackageManager, setShowPackageManager] = useState(false);
+  const [activeCellId, setActiveCellId] = useState<string | null>(null);
+  const [notebookContext, setNotebookContext] = useState<{
+    methods: {
+      name: string;
+      inputs: string[];
+      output: string;
+      description: string;
+    }[];
+    variables: { [key: string]: string };
+  }>({
+    methods: [],
+    variables: {}
+  });
+  const [showContextDialog, setShowContextDialog] = useState(false);
+
+  const fetchNotebooks = async () => {
+    try {
+      const response = await fetch('/api/notebooks');
+      if (!response.ok) throw new Error('Failed to fetch notebooks');
+      
+      const data = await response.json();
+      setNotebooks(data.notebooks);
+    } catch (error) {
+      console.error('Error fetching notebooks:', error);
+    }
+  };
 
   useEffect(() => {
     fetchNotebooks();
+  }, []);
+
+  useEffect(() => {
     const savedCells = localStorage.getItem('notebookCells');
     if (savedCells) {
       setCells(JSON.parse(savedCells));
@@ -82,6 +117,27 @@ const NotebookComponent: React.FC = () => {
         setCells(prevCells => 
           prevCells.map(cell => {
             if (cell.id === executingCellId) {
+              if (result.status === 'success') {
+                try {
+                  const cell = cells.find(c => c.id === executingCellId);
+                  if (cell) {
+                    const assignments = cell.content.match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^=\n]+)/g);
+                    if (assignments) {
+                      const newVars: { [key: string]: string } = {};
+                      assignments.forEach(assignment => {
+                        const [name, value] = assignment.split('=').map(s => s.trim());
+                        newVars[name] = value;
+                      });
+                      setNotebookContext(prev => ({
+                        ...prev,
+                        variables: { ...prev.variables, ...newVars }
+                      }));
+                    }
+                  }
+                } catch (e) {
+                  console.error('Error parsing variables:', e);
+                }
+              }
               return {
                 ...cell,
                 output: result.status === 'success' ? result.output : result.error
@@ -94,59 +150,118 @@ const NotebookComponent: React.FC = () => {
     }
   }, [executingCellId]);
 
-  const fetchNotebooks = async () => {
-    try {
-      const response = await fetch('/api/filesystem');
-      if (response.ok) {
-        const notebookList = await response.json();
-        setNotebooks(notebookList);
-      } else {
-        console.error('Failed to fetch notebooks');
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        if (activeCellId) {
+          const cell = cells.find(c => c.id === activeCellId);
+          if (cell && cell.type === 'code' && cell.content.trim()) {
+            executeCell(activeCellId);
+            event.stopPropagation();
+            return false;
+          }
+        }
       }
-    } catch (error) {
-      console.error('Error fetching notebooks:', error);
-    }
-  };
+      
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 'b') {
+        event.preventDefault();
+        addCell('code');
+      }
+      
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.key === 't') {
+        event.preventDefault();
+        addCell('markdown');
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [activeCellId, cells]);
 
   const saveNotebook = async () => {
-    if (newNotebookName) {
-      try {
-        const response = await fetch('/api/filesystem', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: newNotebookName, content: cells }),
-        });
-        if (response.ok) {
-          setCurrentNotebook(newNotebookName);
-          fetchNotebooks();
-          setShowSaveDialog(false);
-          setNewNotebookName('');
-        } else {
-          console.error('Failed to save notebook');
-        }
-      } catch (error) {
-        console.error('Error saving notebook:', error);
+    if (!newNotebookName.trim()) {
+      alert('Please enter a notebook name');
+      return;
+    }
+
+    const notebook = {
+      id: uuidv4(),
+      name: newNotebookName,
+      createdAt: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+      cells: cells,
+      metadata: {
+        context: notebookContext
       }
+    };
+
+    try {
+      const response = await fetch('/api/notebooks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(notebook),
+      });
+      if (response.ok) {
+        setCurrentNotebook(newNotebookName);
+        fetchNotebooks();
+        setShowSaveDialog(false);
+        setNewNotebookName('');
+      } else {
+        alert('Failed to save notebook');
+      }
+    } catch (error) {
+      console.error('Error saving notebook:', error);
+      alert('Error saving notebook');
     }
   };
 
   const loadNotebook = async (filename: string) => {
     try {
-      const response = await fetch(`/api/filesystem?filename=${filename}`);
+      const response = await fetch(`/api/notebooks/${filename}`);
       if (response.ok) {
-        const loadedCells = await response.json();
-        setCells(loadedCells);
-        setCurrentNotebook(filename);
+        const notebook = await response.json();
+        setCells(notebook.cells);
+        setCurrentNotebook(notebook.name);
+        if (notebook.metadata?.context) {
+          setNotebookContext(notebook.metadata.context);
+        } else {
+          setNotebookContext({
+            methods: [],
+            variables: {}
+          });
+        }
       } else {
-        console.error('Failed to load notebook');
+        alert('Failed to load notebook');
       }
     } catch (error) {
       console.error('Error loading notebook:', error);
+      alert('Error loading notebook');
     }
   };
 
   const addCell = (type: CellType) => {
-    setCells(prevCells => [...prevCells, { id: uuidv4(), type, content: '', output: '' }]);
+    const newCellId = uuidv4();
+    setCells(prevCells => {
+      const activeIndex = prevCells.findIndex(cell => cell.id === activeCellId);
+      
+      const insertIndex = activeIndex !== -1 ? activeIndex + 1 : prevCells.length;
+      
+      const newCells = [
+        ...prevCells.slice(0, insertIndex),
+        { id: newCellId, type, content: '', output: '' },
+        ...prevCells.slice(insertIndex)
+      ];
+      
+      return newCells;
+    });
+    
+    setActiveCellId(newCellId);
+    
+    setTimeout(() => {
+      const element = document.getElementById(`cell-${newCellId}`);
+      element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
   };
 
   const updateCellContent = (id: string, content: string) => {
@@ -188,7 +303,50 @@ const NotebookComponent: React.FC = () => {
         prevCells.map(c => c.id === id ? { ...c, output: 'Executing...' } : c)
       );
       
-      wsClient.executeCode(cell.content);
+      // Trim any trailing newlines before sending
+      const codeToExecute = cell.content.trimEnd();
+      wsClient.executeCode(codeToExecute);
+      
+      // Match function definitions with docstrings
+      const functionRegex = /def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*?)\)(?:\s*->\s*([^:]+))?\s*:(?:\s*['"]{3}([\s\S]*?)['"]{3})?/g;
+      const matches = [...cell.content.matchAll(functionRegex)];
+      
+      if (matches.length > 0) {
+        const newMethods = matches.map(match => ({
+          name: match[1],
+          inputs: match[2].split(',').map(param => param.trim()).filter(Boolean),
+          output: match[3]?.trim() || '',
+          description: match[4]?.trim() || ''
+        }));
+        
+        setNotebookContext(prev => ({
+          ...prev,
+          methods: [...prev.methods, ...newMethods]
+        }));
+      }
+      
+      // Track variables defined at module level (not inside functions)
+      const lines = cell.content.split('\n');
+      const moduleVars: { [key: string]: string } = {};
+      
+      let inFunction = false;
+      for (const line of lines) {
+        if (line.trim().startsWith('def ')) {
+          inFunction = true;
+        } else if (line.match(/^[a-zA-Z_][a-zA-Z0-9_]*\s*=/)) {
+          if (!inFunction) {
+            const [name, ...valueParts] = line.split('=');
+            moduleVars[name.trim()] = valueParts.join('=').trim();
+          }
+        }
+      }
+      
+      if (Object.keys(moduleVars).length > 0) {
+        setNotebookContext(prev => ({
+          ...prev,
+          variables: { ...prev.variables, ...moduleVars }
+        }));
+      }
     }
   };
 
@@ -208,60 +366,106 @@ const NotebookComponent: React.FC = () => {
     border: theme === 'dark' ? 'border-[#333333]' : 'border-gray-200',
     input: theme === 'dark' ? 'bg-[#1a1a1a] border-[#333333]' : 'bg-white border-gray-200',
     cell: theme === 'dark' ? 'bg-[#242424]' : 'bg-gray-50',
+    toolbar: theme === 'dark' ? 'bg-[#1e1e1e]' : 'bg-gray-50',
+  };
+
+  const setActiveCell = (id: string) => {
+    setActiveCellId(id);
+  };
+
+  const moveToCell = (currentIndex: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    
+    if (targetIndex >= 0 && targetIndex < cells.length) {
+      const targetCell = cells[targetIndex];
+      setActiveCellId(targetCell.id);
+    }
+  };
+
+  const handleAutoSave = () => {
+    if (currentNotebook) {
+      const notebook = {
+        id: currentNotebook,
+        name: currentNotebook,
+        lastModified: new Date().toISOString(),
+        cells: cells,
+        metadata: {
+          context: notebookContext
+        }
+      };
+      fetch(`/api/notebooks/${currentNotebook}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(notebook),
+      });
+    }
   };
 
   return (
     <div className={`flex flex-col h-screen overflow-hidden ${themeStyles.background} ${themeStyles.text}`}>
       <nav className={`border-b p-4 z-10 ${themeStyles.nav}`}>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center">
           <h1 className="text-2xl font-semibold">AI Notebook</h1>
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={() => setShowPackageManager(true)}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-            >
-              Manage Packages
-            </button>
-            <button
-              onClick={toggleTheme}
-              className={`p-2 rounded-lg hover:bg-opacity-80 transition-colors ${
-                theme === 'dark' ? 'bg-[#333333]' : 'bg-gray-200'
-              }`}
-            >
-              {theme === 'dark' ? (
-                <SunIcon className="h-5 w-5" />
-              ) : (
-                <MoonIcon className="h-5 w-5" />
-              )}
-            </button>
-            <button
-              onClick={() => setShowSaveDialog(true)}
-              className="px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700 transition-colors"
-            >
-              Save Notebook
-            </button>
-            <select
-              onChange={(e) => loadNotebook(e.target.value)}
-              value={currentNotebook}
-              className={`px-4 py-2 border rounded focus:ring-2 focus:ring-emerald-500 focus:border-transparent ${
-                theme === 'dark' 
-                  ? 'bg-[#2a2a2a] border-[#333333]' 
-                  : 'bg-white border-gray-200'
-              }`}
-            >
-              <option value="">Select a notebook</option>
-              {notebooks.map((notebook) => (
-                <option key={notebook} value={notebook}>
-                  {notebook}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
       </nav>
+      
+      <div className={`border-b ${themeStyles.toolbar}`}>
+        <div className="px-4 py-2">
+          <Toolbar
+            onAddCell={addCell}
+            onSaveNotebook={() => {
+              if (!currentNotebook) {
+                setShowSaveDialog(true);
+              } else {
+                const notebook = {
+                  id: currentNotebook,
+                  name: currentNotebook,
+                  lastModified: new Date().toISOString(),
+                  cells: cells,
+                  metadata: {
+                    context: notebookContext
+                  }
+                };
+                fetch(`/api/notebooks/${currentNotebook}.json`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(notebook),
+                }).then(response => {
+                  if (response.ok) {
+                    fetchNotebooks();
+                  } else {
+                    alert('Failed to save notebook');
+                  }
+                }).catch(error => {
+                  console.error('Error saving notebook:', error);
+                  alert('Error saving notebook');
+                });
+              }
+            }}
+            onCreateNewNotebook={() => {
+              setCells([{ id: uuidv4(), type: 'code', content: '', output: '' }]);
+              setCurrentNotebook('');
+              setNotebookContext({ methods: [], variables: {} });
+            }}
+            onSelectNotebook={loadNotebook}
+            onManagePackages={() => setShowPackageManager(true)}
+            notebooks={notebooks}
+            currentNotebook={currentNotebook}
+            setShowContextDialog={setShowContextDialog}
+            notebook={{
+              id: currentNotebook,
+              name: currentNotebook,
+              createdAt: new Date().toISOString(),
+              lastModified: new Date().toISOString(),
+              cells: cells
+            }}
+            setShowSaveDialog={setShowSaveDialog}
+          />
+        </div>
+      </div>
+
       <div className="flex flex-1 overflow-hidden">
         <div className="w-[70%] p-6 overflow-y-auto">
-          <Toolbar onAddCell={addCell} />
           <div className="space-y-4">
             {cells.map((cell, index) => (
               <CellComponent
@@ -274,6 +478,10 @@ const NotebookComponent: React.FC = () => {
                 moveCellUp={() => moveCellUp(index)}
                 moveCellDown={() => moveCellDown(index)}
                 addContextToChat={addContextToChat}
+                isActive={cell.id === activeCellId}
+                setActiveCell={setActiveCell}
+                moveToPreviousCell={() => moveToCell(index, 'up')}
+                moveToNextCell={() => moveToCell(index, 'down')}
               />
             ))}
           </div>
@@ -314,6 +522,12 @@ const NotebookComponent: React.FC = () => {
         <PackageManager
           onClose={() => setShowPackageManager(false)}
           wsClient={wsClient}
+        />
+      )}
+      {showContextDialog && (
+        <NotebookContext
+          context={notebookContext}
+          onClose={() => setShowContextDialog(false)}
         />
       )}
     </div>

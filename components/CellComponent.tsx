@@ -2,11 +2,13 @@ import React, { useCallback, useRef, useState, useEffect } from 'react';
 import CodeMirror from '@uiw/react-codemirror';
 import { python } from '@codemirror/lang-python';
 import { markdown } from '@codemirror/lang-markdown';
-import { EditorView } from '@codemirror/view';
+import { EditorView, keymap } from '@codemirror/view';
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import { Cell } from '@/types/notebook';
 import { ArrowRightCircleIcon } from '@heroicons/react/24/outline';
 import { Message, useCompletion } from 'ai/react';
+import { Prec } from '@codemirror/state';
+import { EditorSelection } from '@codemirror/state';
 // import { useTheme } from '@/contexts/ThemeContext';
 
 interface CellComponentProps {
@@ -19,6 +21,10 @@ interface CellComponentProps {
   moveCellDown: () => void;
   addContextToChat: (content: string, type: 'code' | 'output') => void;
   cursorPosition?: number;
+  isActive: boolean;
+  setActiveCell: (id: string) => void;
+  moveToPreviousCell?: () => void;
+  moveToNextCell?: () => void;
 }
 
 const CellComponent: React.FC<CellComponentProps> = ({
@@ -30,6 +36,10 @@ const CellComponent: React.FC<CellComponentProps> = ({
   moveCellUp,
   moveCellDown,
   addContextToChat,
+  isActive,
+  setActiveCell,
+  moveToPreviousCell,
+  moveToNextCell,
 }) => {
   // const { theme } = useTheme();
   
@@ -40,8 +50,9 @@ const CellComponent: React.FC<CellComponentProps> = ({
 
   const editorRef = useRef<any>(null);
   const [cursorPos, setCursorPos] = useState<number>(0);
+  const [selectedCode, setSelectedCode] = useState<string>('');
 
-  const { completion, input, handleInputChange, handleSubmit, isLoading } = useCompletion({
+  const { completion, input, handleInputChange, handleSubmit, isLoading: isGenerateLoading } = useCompletion({
     api: '/api/generate',
     onResponse: async (response: Response) => {
       const reader = response.body?.getReader();
@@ -86,10 +97,74 @@ const CellComponent: React.FC<CellComponentProps> = ({
     }
   });
 
+  const { completion: editCompletion, input: editInput, handleInputChange: handleEditInputChange, handleSubmit: handleEditSubmit, isLoading: isEditLoading } = useCompletion({
+    api: '/api/edit',
+    body: { selectedCode },
+    onResponse: async (response: Response) => {
+      const reader = response.body?.getReader();
+      if (!reader) return;
+
+      const decoder = new TextDecoder();
+      let insertPos = cursorPos; // Keep track of where to insert next token
+      
+      try {
+        // First, delete the selected code
+        const editor = editorRef.current?.view;
+        if (editor) {
+          const docLength = editor.state.doc.length;
+          const from = Math.min(cursorPos, docLength);
+          const to = Math.min(cursorPos + selectedCode.length, docLength);
+          
+          const deleteTransaction = editor.state.update({
+            changes: { from, to, insert: '' }
+          });
+          editor.dispatch(deleteTransaction);
+        }
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          const chunk = decoder.decode(value);
+          const lines = chunk.split('\n').filter(line => line.trim());
+          
+          for (const line of lines) {
+            if (line.startsWith('0:')) {
+              try {
+                const content = JSON.parse(line.slice(2));
+                if (editor) {
+                  const transaction = editor.state.update({
+                    changes: { from: insertPos, insert: content }
+                  });
+                  editor.dispatch(transaction);
+                  insertPos += content.length; // Update insert position
+                  updateContent(cell.id, editor.state.doc.toString());
+                }
+              } catch (e) {
+                console.error('Failed to parse chunk:', e);
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+    }
+  });
+
   const handlePromptSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    handleSubmit(e); // Submit the prompt
-    setShowPromptDialog(false); // Close dialog immediately
+    
+    if (selectedCode) {
+      // Use edit completion for selected code
+      handleEditSubmit(e);
+    } else {
+      // Use regular completion for code generation
+      handleSubmit(e);
+    }
+    
+    setShowPromptDialog(false);
+    setSelectedCode(''); // Reset selected code
   };
 
   const handleCancel = (e: React.MouseEvent) => {
@@ -100,15 +175,39 @@ const CellComponent: React.FC<CellComponentProps> = ({
   const [showPromptDialog, setShowPromptDialog] = useState(false);
 
   const handleKeyDown = useCallback(async (event: React.KeyboardEvent) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
-      event.preventDefault();
-      const editor = editorRef.current?.view;
-      if (editor) {
-        setCursorPos(editor.state.selection.main.head);
+    if ((event.metaKey || event.ctrlKey)) {
+      switch (event.key) {
+        case 'Enter':
+          event.preventDefault();
+          event.stopPropagation();
+          executeCell(cell.id);
+          return false;
+        case 'k':
+          event.preventDefault();
+          const editor = editorRef.current?.view;
+          if (editor) {
+            // Get the current selection
+            const selection = editor.state.selection.main;
+            const selectedText = editor.state.sliceDoc(selection.from, selection.to);
+            
+            // Store both cursor position and selected text
+            setCursorPos(selection.from);
+            setSelectedCode(selectedText);
+            
+            setShowPromptDialog(true);
+          }
+          break;
+        case 'ArrowUp':
+          event.preventDefault();
+          moveToPreviousCell?.();
+          break;
+        case 'ArrowDown':
+          event.preventDefault();
+          moveToNextCell?.();
+          break;
       }
-      setShowPromptDialog(true);
     }
-  }, []);
+  }, [moveToPreviousCell, moveToNextCell, executeCell, cell.id]);
 
   const handlePromptKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -134,8 +233,33 @@ const CellComponent: React.FC<CellComponentProps> = ({
     return output;
   };
 
+  // Focus the editor when the cell becomes active
+  useEffect(() => {
+    if (isActive) {
+      setTimeout(() => {
+        const editor = editorRef.current?.view;
+        if (editor) {
+          editor.focus();
+        }
+      }, 50);
+    }
+  }, [isActive]);
+
+  const handlePromptInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (selectedCode) {
+      handleEditInputChange(e);
+    } else {
+      handleInputChange(e);
+    }
+  };
+
+  const isLoading = selectedCode ? isEditLoading : isGenerateLoading;
+
   return (
-    <div className="mb-8 relative group">
+    <div 
+      id={`cell-${cell.id}`} // Add an ID to help with scrolling
+      className="mb-8 relative group"
+    >
       <div className="flex gap-2 flex-col">
         <div className="flex items-center justify-between text-gray-400 text-sm pr-8">
           <span>In [{index + 1}]:</span>
@@ -180,11 +304,22 @@ const CellComponent: React.FC<CellComponentProps> = ({
                   extensions={[
                     cell.type === 'code' ? python() : markdown(),
                     EditorView.lineWrapping,
+                    Prec.highest(keymap.of([
+                      {
+                        key: 'Mod-Enter',
+                        run: (view) => {
+                          executeCell(cell.id);
+                          return true;
+                        },
+                        preventDefault: true
+                      }
+                    ]))
                   ]}
                   onChange={(value) => updateContent(cell.id, value)}
                   theme={vscodeDark}
-                  className="text-sm"
                   onKeyDown={handleKeyDown}
+                  onFocus={() => setActiveCell(cell.id)}
+                  className={`text-sm ${isActive ? 'ring-2 ring-blue-500' : ''}`}
                 />
               </div>
               <div className="pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -211,7 +346,7 @@ const CellComponent: React.FC<CellComponentProps> = ({
                   </div>
                   <div className="pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button
-                      onClick={() => addContextToChat(cell.output, 'output')}
+                      onClick={() => cell.output && addContextToChat(cell.output, 'output')}
                       className="text-green-500 hover:text-green-600 transition-colors"
                       title="Add output to chat context"
                     >
@@ -231,8 +366,8 @@ const CellComponent: React.FC<CellComponentProps> = ({
             <form onSubmit={handlePromptSubmit}>
               <input
                 type="text"
-                value={input}
-                onChange={handleInputChange}
+                value={selectedCode ? editInput : input}
+                onChange={handlePromptInputChange}
                 onKeyDown={handlePromptKeyDown}
                 placeholder="Describe the code you want to generate..."
                 className="w-full p-2 bg-[#1a1a1a] border border-[#333333] rounded mb-4"

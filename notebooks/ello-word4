@@ -1,0 +1,25 @@
+{
+  "id": "ello-word4",
+  "name": "ello-word4",
+  "lastModified": "2025-01-11T21:03:17.064Z",
+  "cells": [
+    {
+      "id": "ab73e4f3-74c9-4593-907d-a745a25ca7cf",
+      "type": "code",
+      "content": "print(\"ello word\")\n\n",
+      "output": "ello word\n"
+    },
+    {
+      "id": "e49a4898-126b-4dc2-8dcc-971c9826f35a",
+      "type": "code",
+      "content": "def do_stuff():\n  do = stuff + stuff\n  return do\n\n\n  ",
+      "output": ""
+    },
+    {
+      "id": "bf658058-3d2f-4239-b263-b3d703e2ca18",
+      "type": "code",
+      "content": "print(\"another world\")\n",
+      "output": "another world\n"
+    }
+  ]
+}
