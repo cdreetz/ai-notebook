@@ -10,6 +10,7 @@ import { executePythonInBrowser } from '@/utils/pyodideWorker';
 import { useTheme } from '@/contexts/ThemeContext';
 import { SunIcon, MoonIcon } from '@heroicons/react/24/outline';
 import { NotebookWebSocket } from '@/app/lib/websocket';
+import PackageManager from '@/components/PackageManager';
 
 const NotebookComponent: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
@@ -21,6 +22,8 @@ const NotebookComponent: React.FC = () => {
   const [chatContext, setChatContext] = useState<string | null>(null);
   const [wsClient, setWsClient] = useState<NotebookWebSocket | null>(null);
   const [executingCellId, setExecutingCellId] = useState<string | null>(null);
+  const [packageManagerOpen, setPackageManagerOpen] = useState(false);
+  const [showPackageManager, setShowPackageManager] = useState(false);
 
   useEffect(() => {
     fetchNotebooks();
@@ -214,6 +217,12 @@ const NotebookComponent: React.FC = () => {
           <h1 className="text-2xl font-semibold">AI Notebook</h1>
           <div className="flex items-center space-x-4">
             <button
+              onClick={() => setShowPackageManager(true)}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+            >
+              Manage Packages
+            </button>
+            <button
               onClick={toggleTheme}
               className={`p-2 rounded-lg hover:bg-opacity-80 transition-colors ${
                 theme === 'dark' ? 'bg-[#333333]' : 'bg-gray-200'
@@ -300,6 +309,12 @@ const NotebookComponent: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+      {showPackageManager && (
+        <PackageManager
+          onClose={() => setShowPackageManager(false)}
+          wsClient={wsClient}
+        />
       )}
     </div>
   );

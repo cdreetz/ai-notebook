@@ -5,6 +5,12 @@ import jupyter_client
 import asyncio
 from typing import Dict, Optional
 from queue import Empty
+import subprocess
+import sys
+import os
+from pathlib import Path
+import json
+import platform
 
 app = FastAPI()
 
@@ -20,9 +26,25 @@ app.add_middleware(
 # Store kernel managers
 kernel_managers: Dict[str, jupyter_client.KernelManager] = {}
 
+# Get the absolute path to the virtual environment
+VENV_PATH = str(Path(__file__).parent.parent / 'env')
+VENV_BIN = 'Scripts' if sys.platform == 'win32' else 'bin'
+VENV_PYTHON = str(Path(VENV_PATH) / VENV_BIN / ('python.exe' if sys.platform == 'win32' else 'python'))
+VENV_PIP = str(Path(VENV_PATH) / VENV_BIN / ('pip.exe' if sys.platform == 'win32' else 'pip'))
+
+# Ensure we're using the virtual environment
+if not os.environ.get('VIRTUAL_ENV'):
+    os.environ['VIRTUAL_ENV'] = VENV_PATH
+    os.environ['PATH'] = f"{os.path.join(VENV_PATH, VENV_BIN)}{os.pathsep}{os.environ['PATH']}"
+    sys.prefix = VENV_PATH
+
 class ExecuteRequest(BaseModel):
     type: str
     content: str
+    session_id: str = 'default'
+
+class PackageRequest(BaseModel):
+    package_name: str
     session_id: str = 'default'
 
 def initialize_kernel(session_id: str = 'default'):
@@ -106,6 +128,82 @@ async def execute_code(request: ExecuteRequest):
             "status": "error",
             "error": str(e)
         }
+
+@app.post("/install-package")
+async def install_package(request: PackageRequest):
+    try:
+        # Use the virtual environment's pip
+        process = subprocess.Popen(
+            [VENV_PIP, "install", request.package_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={
+                'PATH': f"{os.path.join(VENV_PATH, VENV_BIN)}{os.pathsep}{os.environ['PATH']}",
+                'VIRTUAL_ENV': VENV_PATH
+            }
+        )
+        stdout, stderr = process.communicate()
+        
+        if process.returncode != 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to install package: {stderr.decode()}"
+            )
+            
+        # Restart the kernel to make new package available
+        if request.session_id in kernel_managers:
+            km = kernel_managers[request.session_id]
+            km.restart_kernel()
+            
+        return {
+            "status": "success",
+            "message": f"Successfully installed {request.package_name}"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error installing package: {str(e)}"
+        )
+
+@app.get("/list-packages")
+async def list_packages():
+    try:
+        # Get installed packages
+        process = subprocess.Popen(
+            [VENV_PIP, "list", "--format=json"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={
+                'PATH': f"{os.path.join(VENV_PATH, VENV_BIN)}{os.pathsep}{os.environ['PATH']}",
+                'VIRTUAL_ENV': VENV_PATH
+            }
+        )
+        stdout, stderr = process.communicate()
+        
+        if process.returncode != 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to list packages: {stderr.decode()}"
+            )
+        
+        # Format package list nicely
+        packages_list = json.loads(stdout.decode())
+        formatted_packages = "\n".join(
+            f"{pkg['name']}=={pkg['version']}" 
+            for pkg in sorted(packages_list, key=lambda x: x['name'].lower())
+        )
+            
+        return {
+            "status": "success",
+            "venv_path": VENV_PATH,
+            "python_version": f"Python {platform.python_version()}",
+            "packages": formatted_packages
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error listing packages: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn
