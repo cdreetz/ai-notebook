@@ -92,6 +92,12 @@ const NotebookComponent: React.FC = () => {
       setCells(prevCells => 
         prevCells.map(cell => {
           if (cell.id === executingCellId) {
+            if (result.status === 'success' && !result.output && result.display_data) {
+              return {
+                ...cell,
+                output: result.display_data
+              };
+            }
             return {
               ...cell,
               output: result.status === 'success' ? result.output : result.error
@@ -118,30 +124,35 @@ const NotebookComponent: React.FC = () => {
           prevCells.map(cell => {
             if (cell.id === executingCellId) {
               if (result.status === 'success') {
-                try {
-                  const cell = cells.find(c => c.id === executingCellId);
-                  if (cell) {
-                    const assignments = cell.content.match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^=\n]+)/g);
-                    if (assignments) {
-                      const newVars: { [key: string]: string } = {};
-                      assignments.forEach(assignment => {
-                        const [name, value] = assignment.split('=').map(s => s.trim());
-                        newVars[name] = value;
-                      });
-                      setNotebookContext(prev => ({
-                        ...prev,
-                        variables: { ...prev.variables, ...newVars }
-                      }));
-                    }
-                  }
-                } catch (e) {
-                  console.error('Error parsing variables:', e);
+                let formattedOutput = result.output;
+                
+                // Handle matplotlib display_data
+                if (result.display_data) {
+                  return {
+                    ...cell,
+                    output: result.display_data
+                  };
                 }
+
+                // Only try to format if output is a string
+                if (typeof result.output === 'string') {
+                  formattedOutput = result.output
+                    .replace(/\\n/g, '\n')
+                    .replace(/\\t/g, '\t')
+                    .replace(/\\'/g, "'")
+                    .replace(/\\"/g, '"');
+                }
+                
+                return {
+                  ...cell,
+                  output: formattedOutput
+                };
+              } else {
+                return {
+                  ...cell,
+                  output: result.error || 'Error executing cell'
+                };
               }
-              return {
-                ...cell,
-                output: result.status === 'success' ? result.output : result.error
-              };
             }
             return cell;
           })
@@ -264,9 +275,13 @@ const NotebookComponent: React.FC = () => {
     }, 100);
   };
 
-  const updateCellContent = (id: string, content: string) => {
+  const updateCellContent = (id: string, content: string, clearOutput?: boolean) => {
     setCells(prevCells => 
-      prevCells.map(cell => cell.id === id ? { ...cell, content } : cell)
+      prevCells.map(cell => cell.id === id ? { 
+        ...cell, 
+        content,
+        output: clearOutput ? '' : cell.output 
+      } : cell)
     );
   };
 
@@ -303,13 +318,12 @@ const NotebookComponent: React.FC = () => {
         prevCells.map(c => c.id === id ? { ...c, output: 'Executing...' } : c)
       );
       
-      // Trim any trailing newlines before sending
       const codeToExecute = cell.content.trimEnd();
       wsClient.executeCode(codeToExecute);
       
       // Match function definitions with docstrings
       const functionRegex = /def\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\((.*?)\)(?:\s*->\s*([^:]+))?\s*:(?:\s*['"]{3}([\s\S]*?)['"]{3})?/g;
-      const matches = [...cell.content.matchAll(functionRegex)];
+      const matches = Array.from(cell.content.matchAll(functionRegex));
       
       if (matches.length > 0) {
         const newMethods = matches.map(match => ({
@@ -319,24 +333,49 @@ const NotebookComponent: React.FC = () => {
           description: match[4]?.trim() || ''
         }));
         
-        setNotebookContext(prev => ({
-          ...prev,
-          methods: [...prev.methods, ...newMethods]
-        }));
+        // Update context, replacing existing methods with same name
+        setNotebookContext(prev => {
+          const updatedMethods = [...prev.methods];
+          newMethods.forEach(newMethod => {
+            const existingIndex = updatedMethods.findIndex(m => m.name === newMethod.name);
+            if (existingIndex !== -1) {
+              updatedMethods[existingIndex] = newMethod;
+            } else {
+              updatedMethods.push(newMethod);
+            }
+          });
+          return {
+            ...prev,
+            methods: updatedMethods
+          };
+        });
       }
       
-      // Track variables defined at module level (not inside functions)
-      const lines = cell.content.split('\n');
+      // Track only module-level variables (not inside functions)
       const moduleVars: { [key: string]: string } = {};
       
-      let inFunction = false;
+      // Split into lines and process each line
+      const lines = cell.content.split('\n');
+      let insideFunction = false;
+      
       for (const line of lines) {
+        // Check if we're entering a function definition
         if (line.trim().startsWith('def ')) {
-          inFunction = true;
-        } else if (line.match(/^[a-zA-Z_][a-zA-Z0-9_]*\s*=/)) {
-          if (!inFunction) {
-            const [name, ...valueParts] = line.split('=');
-            moduleVars[name.trim()] = valueParts.join('=').trim();
+          insideFunction = true;
+          continue;
+        }
+        
+        // Check if we're exiting a function (line with no indentation)
+        if (insideFunction && !line.startsWith(' ') && !line.startsWith('\t') && line.trim() !== '') {
+          insideFunction = false;
+        }
+        
+        // Only process unindented variable assignments outside of functions
+        if (!insideFunction && !line.startsWith(' ') && !line.startsWith('\t')) {
+          const match = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*(.+)$/);
+          if (match) {
+            const [_, name, value] = match;
+            moduleVars[name.trim()] = value.trim();
           }
         }
       }
@@ -409,7 +448,7 @@ const NotebookComponent: React.FC = () => {
         </div>
       </nav>
       
-      <div className={`border-b ${themeStyles.toolbar}`}>
+      <div className={`border-b border-gray-400`}>
         <div className="px-4 py-2">
           <Toolbar
             onAddCell={addCell}

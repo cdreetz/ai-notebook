@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { useTheme } from '@/contexts/ThemeContext';
 import { Notebook } from '@/types/notebook';
+import ShortcutsDialog from './ShortcutsDialog';
 
 interface ToolbarProps {
   onAddCell: (type: 'code' | 'markdown') => void;
@@ -53,6 +54,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const { theme } = useTheme();
+  const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
 
   const handleDropdownClick = (dropdown: string) => {
     setActiveDropdown(activeDropdown === dropdown ? null : dropdown);
@@ -116,10 +118,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
     help: [
       { 
         label: 'Keyboard Shortcuts',
-        action: () => {
-          // TODO: Show shortcuts dialog
-          alert('Shortcuts:\n⌘/Ctrl + Enter: Run Cell\n⌘/Ctrl + Shift + B: Add Code Cell\n⌘/Ctrl + Shift + T: Add Text Cell');
-        }
+        action: () => setShowShortcutsDialog(true)
       },
       { 
         label: 'Report Issue',
@@ -193,6 +192,10 @@ const Toolbar: React.FC<ToolbarProps> = ({
         <span className="ml-4 text-gray-400">
           Current: {currentNotebook}
         </span>
+      )}
+      
+      {showShortcutsDialog && (
+        <ShortcutsDialog onClose={() => setShowShortcutsDialog(false)} />
       )}
     </div>
   );

@@ -19,7 +19,7 @@ export class NotebookWebSocket {
 
   private connect() {
     if (this.socket?.connected) return;
-
+    
     this.socket = io('http://localhost:3000/notebook', {
       transports: ['websocket', 'polling'],
       reconnection: true,

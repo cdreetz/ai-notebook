@@ -89,6 +89,8 @@ async def execute_code(request: ExecuteRequest):
         
         # Get the response
         output_parts = []
+        display_data = None
+        
         while True:
             try:
                 msg = kc.get_iopub_msg(timeout=10)
@@ -105,6 +107,10 @@ async def execute_code(request: ExecuteRequest):
                 elif msg_type == 'execute_result':
                     if 'text/plain' in content.get('data', {}):
                         output_parts.append(content['data']['text/plain'])
+                elif msg_type == 'display_data':
+                    # For matplotlib plots, return the display_data directly
+                    if 'image/png' in content.get('data', {}):
+                        display_data = content
                 elif msg_type == 'error':
                     raise Exception('\n'.join(content['traceback']))
                 elif msg_type == 'status' and content['execution_state'] == 'idle':
@@ -114,12 +120,22 @@ async def execute_code(request: ExecuteRequest):
 
         kc.stop_channels()
         
-        final_output = ''.join(output_parts)
-        print(f"Final output: {final_output}")  # Debug log
+        # If we have display_data (matplotlib output), return that
+        if display_data:
+            # Extract just the data we need
+            plot_data = {
+                "data": display_data.get('data', {}),
+                "metadata": display_data.get('metadata', {})
+            }
+            return {
+                "status": "success",
+                "output": plot_data  # FastAPI will handle the JSON serialization
+            }
         
+        # Otherwise return regular output
         return {
             "status": "success",
-            "output": final_output
+            "output": ''.join(output_parts)
         }
     
     except Exception as e:

@@ -5,16 +5,17 @@ import { markdown } from '@codemirror/lang-markdown';
 import { EditorView, keymap } from '@codemirror/view';
 import { vscodeDark } from '@uiw/codemirror-theme-vscode';
 import { Cell } from '@/types/notebook';
-import { ArrowRightCircleIcon } from '@heroicons/react/24/outline';
+import { ArrowRightCircleIcon, ChevronUpIcon, ChevronDownIcon } from '@heroicons/react/24/outline';
 import { Message, useCompletion } from 'ai/react';
 import { Prec } from '@codemirror/state';
 import { EditorSelection } from '@codemirror/state';
+import { ansiToHtml } from 'ansi-to-html';
 // import { useTheme } from '@/contexts/ThemeContext';
 
 interface CellComponentProps {
   cell: Cell;
   index: number;
-  updateContent: (id: string, content: string) => void;
+  updateContent: (id: string, content: string, clearOutput?: boolean) => void;
   executeCell: (id: string) => void;
   deleteCell: (id: string) => void;
   moveCellUp: () => void;
@@ -26,6 +27,16 @@ interface CellComponentProps {
   moveToPreviousCell?: () => void;
   moveToNextCell?: () => void;
 }
+
+const stripAnsiCodes = (str: string) => {
+  // This regex matches all ANSI escape sequences including color codes, cursor movements, etc.
+  return str.replace(
+    /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, 
+    ''
+  ).replace(/\[38;5;\d+m/g, '') // Remove color codes like [38;5;250m
+   .replace(/\[\d+;\d+;\d+m/g, '') // Remove codes like [1;32m
+   .replace(/\[\d+m/g, ''); // Remove simple codes like [0m
+};
 
 const CellComponent: React.FC<CellComponentProps> = ({
   cell,
@@ -51,6 +62,8 @@ const CellComponent: React.FC<CellComponentProps> = ({
   const editorRef = useRef<any>(null);
   const [cursorPos, setCursorPos] = useState<number>(0);
   const [selectedCode, setSelectedCode] = useState<string>('');
+  const [isCodeCollapsed, setIsCodeCollapsed] = useState(false);
+  const [isOutputCollapsed, setIsOutputCollapsed] = useState(false);
 
   const { completion, input, handleInputChange, handleSubmit, isLoading: isGenerateLoading } = useCompletion({
     api: '/api/generate',
@@ -216,21 +229,119 @@ const CellComponent: React.FC<CellComponentProps> = ({
     }
   };
 
-  const renderOutput = (output: string) => {
-    // Check if the output is a base64 image (matplotlib output)
-    if (output.includes('data:image/png;base64,')) {
+  const renderOutput = (output: string | any) => {
+    // If output is null or undefined, return empty
+    if (output == null) {
+      return null;
+    }
+
+    // For matplotlib plots
+    if (typeof output === 'object' && output.data && output.data['image/png']) {
       return (
-        <img 
-          src={output} 
-          alt="Plot output" 
-          className="max-w-full h-auto my-2"
-          style={{ maxHeight: '500px' }} // Limit the height of matplotlib outputs
-        />
+        <div className="flex flex-col items-center gap-2">
+          {output.data['text/plain'] && (
+            <div className="text-sm text-gray-400">
+              {output.data['text/plain']}
+            </div>
+          )}
+          <img 
+            src={`data:image/png;base64,${output.data['image/png']}`}
+            alt="Plot output" 
+            className="max-w-full h-auto"
+            style={{ maxHeight: '500px' }}
+            onError={(e) => console.error('Image load error:', e)}
+          />
+        </div>
       );
     }
-    
-    // Regular text output
-    return output;
+
+    // For regular string output
+    if (typeof output === 'string') {
+      // Handle error output
+      if (output.includes('---------------------------------------------------------------------------') || 
+          output.includes('Traceback')) {
+        const cleanOutput = stripAnsiCodes(output)
+          .replace(/Cell In\[\d+\], line \d+/, (match) => `\n${match}`)
+          .replace(/File ".*?", line \d+/, (match) => `\n${match}`)
+          .replace(/\n+/g, '\n')
+          .trim();
+
+        return (
+          <div className="overflow-x-auto">
+            <pre className="whitespace-pre font-mono text-sm text-red-400" style={{ display: 'inline-block' }}>
+              {cleanOutput.split('\n').map((line, i) => {
+                if (line.includes('Traceback (most recent call last)')) {
+                  return <div key={i} className="text-yellow-400">{line}</div>;
+                }
+                if (line.startsWith('  File "') || line.startsWith('Cell In[')) {
+                  return <div key={i} className="text-gray-400">{line}</div>;
+                }
+                if (line.match(/^[A-Za-z]+Error:/)) {
+                  return <div key={i} className="text-red-500 font-bold">{line}</div>;
+                }
+                return <div key={i}>{line}</div>;
+              })}
+            </pre>
+          </div>
+        );
+      }
+
+      // Handle structured data output
+      if (output.includes('\n') || output.includes('\t')) {
+        const cleanOutput = stripAnsiCodes(output);
+        return (
+          <div className="overflow-x-auto">
+            <pre className="whitespace-pre font-mono text-sm" style={{ display: 'inline-block' }}>
+              {cleanOutput}
+            </pre>
+          </div>
+        );
+      }
+
+      // Handle regular output with ANSI codes
+      try {
+        const converter = new ansiToHtml({
+          newline: true,
+          escapeXML: true,
+          colors: {
+            0: '#fff',
+            1: '#fff',
+            31: '#f87171',
+            32: '#4ade80',
+            33: '#fbbf24',
+            34: '#60a5fa',
+            35: '#e879f9',
+            36: '#22d3ee',
+          }
+        });
+        const htmlOutput = converter.toHtml(output);
+        return (
+          <div className="overflow-x-auto">
+            <div 
+              className="font-mono whitespace-pre inline-block"
+              dangerouslySetInnerHTML={{ __html: htmlOutput }} 
+            />
+          </div>
+        );
+      } catch (e) {
+        // Fallback to plain text
+        const cleanOutput = stripAnsiCodes(output);
+        return (
+          <div className="overflow-x-auto">
+            <span className="font-mono whitespace-pre inline-block">{cleanOutput}</span>
+          </div>
+        );
+      }
+    }
+
+    // For any other type of output, stringify it
+    return (
+      <div className="overflow-x-auto">
+        <pre className="whitespace-pre font-mono text-sm">
+          {JSON.stringify(output, null, 2)}
+        </pre>
+      </div>
+    );
   };
 
   // Focus the editor when the cell becomes active
@@ -255,14 +366,31 @@ const CellComponent: React.FC<CellComponentProps> = ({
 
   const isLoading = selectedCode ? isEditLoading : isGenerateLoading;
 
+  const clearOutput = () => {
+    updateContent(cell.id, cell.content, true);
+  };
+
   return (
     <div 
-      id={`cell-${cell.id}`} // Add an ID to help with scrolling
-      className="mb-8 relative group"
+      id={`cell-${cell.id}`}
+      className="mb-8 relative group max-w-full"
     >
-      <div className="flex gap-2 flex-col">
+      <div className="flex gap-2 flex-col max-w-full">
         <div className="flex items-center justify-between text-gray-400 text-sm pr-8">
-          <span>In [{index + 1}]:</span>
+          <div className="flex items-center gap-2">
+            <span>In [{index + 1}]:</span>
+            <button
+              onClick={() => setIsCodeCollapsed(!isCodeCollapsed)}
+              className="p-1 hover:bg-[#333333] rounded"
+              title={isCodeCollapsed ? "Expand code" : "Collapse code"}
+            >
+              {isCodeCollapsed ? (
+                <ChevronDownIcon className="h-4 w-4" />
+              ) : (
+                <ChevronUpIcon className="h-4 w-4" />
+              )}
+            </button>
+          </div>
           <div className="space-x-2">
             <button
               onClick={moveCellUp}
@@ -292,10 +420,10 @@ const CellComponent: React.FC<CellComponentProps> = ({
             )}
           </div>
         </div>
-        <div className="flex gap-2 items-stretch">
-          <div className="flex-1">
-            <div className="flex gap-2">
-              <div className="flex-1 border border-[#333333] rounded-lg overflow-hidden bg-[#242424]">
+        <div className="flex gap-2 items-stretch max-w-full">
+          <div className="flex-1 min-w-0">
+            <div className={`flex gap-2 max-w-full ${isCodeCollapsed ? 'hidden' : ''}`}>
+              <div className="flex-1 min-w-0 border border-[#333333] rounded-lg overflow-hidden bg-[#242424]">
                 <CodeMirror
                   ref={editorRef}
                   value={cell.content}
@@ -319,7 +447,7 @@ const CellComponent: React.FC<CellComponentProps> = ({
                   theme={vscodeDark}
                   onKeyDown={handleKeyDown}
                   onFocus={() => setActiveCell(cell.id)}
-                  className={`text-sm ${isActive ? 'ring-2 ring-blue-500' : ''}`}
+                  className={`text-sm overflow-x-auto ${isActive ? 'ring-2 ring-blue-500' : ''}`}
                 />
               </div>
               <div className="pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -335,14 +463,33 @@ const CellComponent: React.FC<CellComponentProps> = ({
             
             {cell.output && (
               <div className="mt-2">
-                <div className="text-gray-400 text-sm mb-1">Out [{index + 1}]:</div>
-                <div className="flex gap-2">
-                  <div className={`flex-1 p-3 rounded-lg text-sm overflow-x-auto border ${
-                    cell.output.startsWith('Error') 
+                <div className="flex items-center justify-between text-gray-400 text-sm mb-1 pr-8">
+                  <div className="flex items-center gap-2">
+                    <span>Out [{index + 1}]:</span>
+                    <button
+                      onClick={() => setIsOutputCollapsed(!isOutputCollapsed)}
+                      className="p-1 hover:bg-[#333333] rounded"
+                      title={isOutputCollapsed ? "Expand output" : "Collapse output"}
+                    >
+                      {isOutputCollapsed ? <ChevronDownIcon className="h-4 w-4" /> : <ChevronUpIcon className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  <button
+                    onClick={clearOutput}
+                    className="px-2 py-1 text-xs bg-red-600/20 text-red-400 rounded hover:bg-red-600/30 transition-colors"
+                  >
+                    Clear Output
+                  </button>
+                </div>
+                <div className={`flex gap-2 max-w-full ${isOutputCollapsed ? 'hidden' : ''}`}>
+                  <div className={`flex-1 min-w-0 p-3 rounded-lg text-sm border ${
+                    typeof cell.output === 'string' && cell.output.startsWith('Error')
                       ? 'bg-red-900/30 text-red-200 border-red-900/50' 
                       : 'bg-[#242424] text-gray-100 border-[#333333]'
                   }`}>
-                    {renderOutput(cell.output)}
+                    <div className="overflow-x-auto">
+                      {renderOutput(cell.output)}
+                    </div>
                   </div>
                   <div className="pt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button

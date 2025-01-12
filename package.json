@@ -21,6 +21,7 @@
     "@uiw/codemirror-theme-vscode": "^4.23.5",
     "@uiw/react-codemirror": "^4.23.7",
     "ai": "^3.4.9",
+    "ansi-to-html": "^0.7.2",
     "cors": "^2.8.5",
     "express": "^4.21.2",
     "heroicons": "^2.1.5",
