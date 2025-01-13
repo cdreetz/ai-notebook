@@ -18,10 +18,45 @@ const PackageManager: React.FC<PackageManagerProps> = ({ onClose, wsClient }) =>
   const [installing, setInstalling] = useState(false);
   const [message, setMessage] = useState('');
   const [envInfo, setEnvInfo] = useState<EnvInfo>({});
+  const [installProgress, setInstallProgress] = useState<string[]>([]);
+  const [installedPackages, setInstalledPackages] = useState<string>('');
 
   useEffect(() => {
     fetchEnvInfo();
-  }, []);
+
+    if (wsClient?.socket) {
+      const handleOutput = (data: string) => {
+        if (data.includes('PACKAGE_PROGRESS:')) {
+          const progressMsg = data.replace('PACKAGE_PROGRESS:', '').trim();
+          setInstallProgress(prev => [...prev, progressMsg]);
+        } else if (data.includes('PACKAGE_ERROR:')) {
+          const errorMsg = data.replace('PACKAGE_ERROR:', '').trim();
+          setMessage(`Error: ${errorMsg}`);
+          setInstalling(false);
+        } else if (data.includes('PACKAGE_SUCCESS:')) {
+          const successMsg = data.replace('PACKAGE_SUCCESS:', '').trim();
+          setMessage(successMsg);
+          setInstalling(false);
+          setPackageName('');
+          // Refresh package list
+          fetchEnvInfo();
+        }
+      };
+
+      // Listen for kernel messages
+      const messageHandler = (msg: any) => {
+        if (msg.msg_type === 'stream' && msg.content?.text) {
+          handleOutput(msg.content.text);
+        }
+      };
+
+      wsClient.socket.on('message', messageHandler);
+
+      return () => {
+        wsClient.socket.off('message', messageHandler);
+      };
+    }
+  }, [wsClient]);
 
   const fetchEnvInfo = async () => {
     try {
@@ -37,11 +72,30 @@ const PackageManager: React.FC<PackageManagerProps> = ({ onClose, wsClient }) =>
     }
   };
 
+  // Add polling function to check if package is installed
+  const checkPackageInstalled = async (pkgName: string) => {
+    try {
+      const response = await fetch('http://localhost:8000/list-packages');
+      const data = await response.json();
+      if (data.packages.includes(pkgName)) {
+        setInstalling(false);
+        setMessage(`Successfully installed ${pkgName}`);
+        setPackageName('');
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Error checking package status:', error);
+      return false;
+    }
+  };
+
   const installPackage = async () => {
     if (!packageName) return;
     
     setInstalling(true);
     setMessage('Installing package...');
+    setInstallProgress([]);
     
     try {
       const response = await fetch('http://localhost:8000/install-package', {
@@ -55,19 +109,25 @@ const PackageManager: React.FC<PackageManagerProps> = ({ onClose, wsClient }) =>
         }),
       });
 
-      const data = await response.json();
-      
-      if (response.ok) {
-        setMessage(`Successfully installed ${packageName}`);
-        setPackageName('');
-        // Refresh package list after successful installation
-        fetchEnvInfo();
-      } else {
-        setMessage(`Error: ${data.detail}`);
-      }
+      // Start polling for package installation
+      const pollInterval = setInterval(async () => {
+        const isInstalled = await checkPackageInstalled(packageName);
+        if (isInstalled) {
+          clearInterval(pollInterval);
+        }
+      }, 2000); // Check every 2 seconds
+
+      // Clear polling after 5 minutes (timeout)
+      setTimeout(() => {
+        clearInterval(pollInterval);
+        if (installing) {
+          setInstalling(false);
+          setMessage('Installation timed out. Please check the package list to verify installation.');
+        }
+      }, 300000);
+
     } catch (error) {
       setMessage(`Error installing package: ${error}`);
-    } finally {
       setInstalling(false);
     }
   };
@@ -145,6 +205,21 @@ const PackageManager: React.FC<PackageManagerProps> = ({ onClose, wsClient }) =>
             </button>
           </div>
         </div>
+
+        {/* Add progress messages display */}
+        {installing && installProgress.length > 0 && (
+          <div className={`mt-4 p-3 rounded ${
+            theme === 'dark' ? 'bg-[#1a1a1a]' : 'bg-gray-100'
+          }`}>
+            <div className="text-sm font-mono max-h-40 overflow-y-auto">
+              {installProgress.map((progress, index) => (
+                <div key={index} className="py-1">
+                  {progress}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import json
 import platform
+import time
 
 app = FastAPI()
 
@@ -148,34 +149,91 @@ async def execute_code(request: ExecuteRequest):
 @app.post("/install-package")
 async def install_package(request: PackageRequest):
     try:
-        # Use the virtual environment's pip
+        if request.session_id not in kernel_managers:
+            initialize_kernel(request.session_id)
+        
+        km = kernel_managers[request.session_id]
+        kc = km.client()
+        
+        # Send initial status
+        kc.execute(f"print('PACKAGE_PROGRESS: Starting installation of {request.package_name}...')")
+        
+        # Use pip in verbose mode to get more output
         process = subprocess.Popen(
-            [VENV_PIP, "install", request.package_name],
+            [VENV_PIP, "install", "-v", request.package_name],  # Added -v flag
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
             env={
                 'PATH': f"{os.path.join(VENV_PATH, VENV_BIN)}{os.pathsep}{os.environ['PATH']}",
                 'VIRTUAL_ENV': VENV_PATH
             }
         )
+
+        last_output_time = time.time()
+        
+        while True:
+            # Check stdout
+            output = process.stdout.readline()
+            if output:
+                last_output_time = time.time()
+                print(f"stdout: {output.strip()}")
+                kc.execute(f"print('PACKAGE_PROGRESS: {output.strip()}')")
+            
+            # Check stderr
+            error = process.stderr.readline()
+            if error:
+                last_output_time = time.time()
+                print(f"stderr: {error.strip()}")
+                kc.execute(f"print('PACKAGE_PROGRESS: {error.strip()}')")
+            
+            # Check if process has finished
+            return_code = process.poll()
+            if return_code is not None:
+                break
+                
+            # Check for timeout (no output for 30 seconds)
+            if time.time() - last_output_time > 30:
+                process.terminate()
+                error_msg = "Installation timed out - no output for 30 seconds"
+                kc.execute(f"print('PACKAGE_ERROR: {error_msg}')")
+                raise HTTPException(status_code=408, detail=error_msg)
+            
+            # Send periodic status if no output
+            if time.time() - last_output_time > 5:
+                kc.execute(f"print('PACKAGE_PROGRESS: Still working... (this may take a few minutes for large packages)')")
+                last_output_time = time.time()
+        
+        # Get any remaining output
         stdout, stderr = process.communicate()
         
         if process.returncode != 0:
+            error_msg = stderr.strip()
+            kc.execute(f"print('PACKAGE_ERROR: {error_msg}')")
             raise HTTPException(
                 status_code=400,
-                detail=f"Failed to install package: {stderr.decode()}"
+                detail=f"Failed to install package: {error_msg}"
             )
             
         # Restart the kernel to make new package available
         if request.session_id in kernel_managers:
+            kc.execute(f"print('PACKAGE_PROGRESS: Installation complete. Restarting kernel...')")
             km = kernel_managers[request.session_id]
             km.restart_kernel()
+            
+        kc.execute(f"print('PACKAGE_SUCCESS: Successfully installed {request.package_name}')")
+        kc.stop_channels()
             
         return {
             "status": "success",
             "message": f"Successfully installed {request.package_name}"
         }
     except Exception as e:
+        print(f"Exception in install_package: {str(e)}")
+        if 'kc' in locals():
+            kc.execute(f"print('PACKAGE_ERROR: {str(e)}')")
+            kc.stop_channels()
         raise HTTPException(
             status_code=500,
             detail=f"Error installing package: {str(e)}"
