@@ -71,9 +71,7 @@ OPENAI_API_KEY=your_api_key_here
 
 4. Start the development server:
 ```bash
-npm run dev
-# or
-yarn dev
+npm run dev-all
 ```
 
 5. Open [http://localhost:3000](http://localhost:3000) in your browser to start using AI Notebook.
@@ -87,3 +85,12 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 [MIT License](LICENSE)
 
+
+
+## TODO
+
+- [] highlight + cmd k
+- [] notebook method context object, as we define new methods, add them to context in a way they can be reused by the AI
+- [] refer to what lou said, click cell to view docs view. maybe use that as the context ?
+- [] more keybinds, new cell, run cell, etc
+- [] new cell should place cursor in the new cell

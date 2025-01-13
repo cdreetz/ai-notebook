@@ -1,0 +1,19 @@
+{
+  "id": "ello-word",
+  "name": "ello-word",
+  "lastModified": "2025-01-11T20:39:40.325Z",
+  "cells": [
+    {
+      "id": "ab73e4f3-74c9-4593-907d-a745a25ca7cf",
+      "type": "code",
+      "content": "print(\"ello word\")\n",
+      "output": "ello word\n"
+    },
+    {
+      "id": "6d1d7a16-103f-481b-9c5b-3b1953d74957",
+      "type": "code",
+      "content": "matrix = [[\"hello world\" for _ in range(5)] for _ in range(5)]\nfor row in matrix:\n    print(row)",
+      "output": "['hello world', 'hello world', 'hello world', 'hello world', 'hello world']\n['hello world', 'hello world', 'hello world', 'hello world', 'hello world']\n['hello world', 'hello world', 'hello world', 'hello world', 'hello world']\n['hello world', 'hello world', 'hello world', 'hello world', 'hello world']\n['hello world', 'hello world', 'hello world', 'hello world', 'hello world']\n"
+    }
+  ]
+}
