@@ -96,3 +96,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 - [] more keybinds, new cell, run cell, etc
 - [] new cell should place cursor in the new cell
 
+- [] add versioning to cells, but just saved diffs instead of full cell code each time to reduce saved text
