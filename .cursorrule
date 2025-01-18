@@ -1,0 +1,7 @@
+We are working on a new jupyter notebook like interface that is AI native.
+
+We are using E2B sandboxes to execute python code.
+Sandboxes do not persist between executions.
+Due to this we cannot ever split up code execution into multiple steps, and have to keep track of definitions to be reused.
+
+The notebook itself should be represented as a JSON, consisting of cells, cell code, cell outputs, defined variables, defined methods, and imports.

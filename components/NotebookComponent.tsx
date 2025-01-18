@@ -2,22 +2,29 @@
 
 import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { Cell, CellType } from '@/types/notebook';
+import { Cell, CellType, NotebookState } from '@/types/notebook';
+import { NotebookService } from '@/services/notebookService';
 import CellComponent from '@/components/CellComponent';
 import Toolbar from '@/components/Toolbar';
 import ChatComponent from '@/components/ChatComponent';
-import { executePythonInBrowser } from '@/utils/pyodideWorker';
 import { useTheme } from '@/contexts/ThemeContext';
-import { SunIcon, MoonIcon } from '@heroicons/react/24/outline';
 
 const NotebookComponent: React.FC = () => {
-  const { theme, toggleTheme } = useTheme();
+  const { theme } = useTheme();
   const [cells, setCells] = useState<Cell[]>([]);
   const [notebooks, setNotebooks] = useState<string[]>([]);
   const [currentNotebook, setCurrentNotebook] = useState<string>('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [newNotebookName, setNewNotebookName] = useState('');
   const [chatContext, setChatContext] = useState<string | null>(null);
+  const [activeCellId, setActiveCellId] = useState<string | null>(null);
+  const [notebookId] = useState(() => uuidv4());
+  const [notebookState, setNotebookState] = useState<NotebookState>({
+    variables: {},
+    methods: [],
+    imports: []
+  });
+  const [showEnvDialog, setShowEnvDialog] = useState(false);
 
   useEffect(() => {
     fetchNotebooks();
@@ -33,17 +40,6 @@ const NotebookComponent: React.FC = () => {
     localStorage.setItem('notebookCells', JSON.stringify(cells));
   }, [cells]);
 
-  useEffect(() => {
-    const loadPyodideScript = () => {
-      const script = document.createElement('script');
-      script.src = "https://cdn.jsdelivr.net/pyodide/v0.24.1/full/pyodide.js";
-      script.async = true;
-      document.body.appendChild(script);
-    };
-
-    loadPyodideScript();
-  }, []);
-
   const fetchNotebooks = async () => {
     try {
       const response = await fetch('/api/filesystem');
@@ -58,13 +54,44 @@ const NotebookComponent: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!activeCellId) return;
+
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'b') {
+        e.preventDefault();
+        addCell('code');
+      }
+      
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 't') {
+        e.preventDefault();
+        addCell('markdown');
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [activeCellId, cells]);
+
   const saveNotebook = async () => {
     if (newNotebookName) {
       try {
         const response = await fetch('/api/filesystem', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: newNotebookName, content: cells }),
+          body: JSON.stringify({ 
+            filename: newNotebookName, 
+            content: {
+              cells,
+              state: notebookState,
+              metadata: {
+                id: notebookId,
+                name: newNotebookName,
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              }
+            }
+          }),
         });
         if (response.ok) {
           setCurrentNotebook(newNotebookName);
@@ -84,8 +111,9 @@ const NotebookComponent: React.FC = () => {
     try {
       const response = await fetch(`/api/filesystem?filename=${filename}`);
       if (response.ok) {
-        const loadedCells = await response.json();
-        setCells(loadedCells);
+        const notebook = await response.json();
+        setCells(notebook.cells);
+        setNotebookState(notebook.state);
         setCurrentNotebook(filename);
       } else {
         console.error('Failed to load notebook');
@@ -96,12 +124,33 @@ const NotebookComponent: React.FC = () => {
   };
 
   const addCell = (type: CellType) => {
-    setCells(prevCells => [...prevCells, { id: uuidv4(), type, content: '', output: '' }]);
+    const newCellId = uuidv4();
+    setCells(prevCells => {
+      const activeIndex = prevCells.findIndex(cell => cell.id === activeCellId);
+      const insertIndex = activeIndex !== -1 ? activeIndex + 1 : prevCells.length;
+      
+      return [
+        ...prevCells.slice(0, insertIndex),
+        { id: newCellId, type, content: '', output: '', hasBeenExecuted: false },
+        ...prevCells.slice(insertIndex)
+      ];
+    });
+    
+    setActiveCellId(newCellId);
+    
+    setTimeout(() => {
+      const element = document.getElementById(`cell-${newCellId}`);
+      element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 100);
   };
 
-  const updateCellContent = (id: string, content: string) => {
+  const updateCellContent = (id: string, content: string, clearOutput?: boolean) => {
     setCells(prevCells => 
-      prevCells.map(cell => cell.id === id ? { ...cell, content } : cell)
+      prevCells.map(cell => cell.id === id ? { 
+        ...cell, 
+        content,
+        output: clearOutput ? '' : cell.output 
+      } : cell)
     );
   };
 
@@ -133,19 +182,38 @@ const NotebookComponent: React.FC = () => {
     const cell = cells.find(c => c.id === id);
     if (cell && cell.type === 'code') {
       try {
-        const result = await executePythonInBrowser(cell.content);
-        
-        if (result.error) {
-          throw new Error(result.error);
-        }
-
+        // Set executing state
         setCells(prevCells => 
-          prevCells.map(c => c.id === id ? { ...c, output: result.output || '' } : c)
+          prevCells.map(c => c.id === id ? { 
+            ...c, 
+            isExecuting: true
+          } : c)
+        );
+
+        // Execute cell using notebook service
+        const { result } = await NotebookService.executeCell(cell, notebookState);
+
+        // Update cell state
+        setCells(prevCells => 
+          prevCells.map(c => c.id === id ? { 
+            ...c, 
+            output: result.output,
+            rawOutput: result.rawOutput,
+            hasBeenExecuted: true,
+            isExecuting: false,
+            error: result.error
+          } : c)
         );
       } catch (error) {
         console.error('Error executing cell:', error);
         setCells(prevCells => 
-          prevCells.map(c => c.id === id ? { ...c, output: error instanceof Error ? error.message : 'Error executing cell' } : c)
+          prevCells.map(c => c.id === id ? { 
+            ...c, 
+            output: '',
+            error: error instanceof Error ? error.message : 'Error executing cell',
+            hasBeenExecuted: true,
+            isExecuting: false
+          } : c)
         );
       }
     }
@@ -160,32 +228,55 @@ const NotebookComponent: React.FC = () => {
     setChatContext(null);
   };
 
-  const themeStyles = {
-    background: theme === 'dark' ? 'bg-[#1a1a1a]' : 'bg-white',
-    nav: theme === 'dark' ? 'bg-[#242424] border-[#333333]' : 'bg-gray-100 border-gray-200',
-    text: theme === 'dark' ? 'text-gray-100' : 'text-gray-900',
-    border: theme === 'dark' ? 'border-[#333333]' : 'border-gray-200',
-    input: theme === 'dark' ? 'bg-[#1a1a1a] border-[#333333]' : 'bg-white border-gray-200',
-    cell: theme === 'dark' ? 'bg-[#242424]' : 'bg-gray-50',
+  const handleSetActiveCell = (id: string) => {
+    setActiveCellId(id);
+  };
+
+  const moveToCell = (currentIndex: number, direction: 'up' | 'down') => {
+    const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+    
+    if (targetIndex >= 0 && targetIndex < cells.length) {
+      const targetCell = cells[targetIndex];
+      setActiveCellId(targetCell.id);
+    }
+  };
+
+  // Group variables by type for better organization
+  const groupVariables = () => {
+    const groups: { [key: string]: { [key: string]: string } } = {
+      numbers: {},
+      strings: {},
+      arrays: {},
+      other: {}
+    };
+
+    Object.entries(notebookState.variables).forEach(([key, value]) => {
+      if (value.startsWith('[') && value.endsWith(']')) {
+        groups.arrays[key] = value;
+      } else if (value.match(/^-?\d*\.?\d+$/)) {
+        groups.numbers[key] = value;
+      } else if (value.startsWith("'") || value.startsWith('"')) {
+        groups.strings[key] = value;
+      } else {
+        groups.other[key] = value;
+      }
+    });
+
+    return groups;
   };
 
   return (
-    <div className={`flex flex-col h-screen overflow-hidden ${themeStyles.background} ${themeStyles.text}`}>
-      <nav className={`border-b p-4 z-10 ${themeStyles.nav}`}>
+    <div className={`flex flex-col h-screen overflow-hidden ${theme === 'dark' ? 'bg-[#1a1a1a]' : 'bg-white'} ${theme === 'dark' ? 'text-gray-100' : 'text-gray-900'}`}>
+      <nav className={`border-b p-4 z-10 ${theme === 'dark' ? 'bg-[#242424] border-[#333333]' : 'bg-gray-100 border-gray-200'}`}>
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold">AI Notebook</h1>
           <div className="flex items-center space-x-4">
             <button
-              onClick={toggleTheme}
-              className={`p-2 rounded-lg hover:bg-opacity-80 transition-colors ${
-                theme === 'dark' ? 'bg-[#333333]' : 'bg-gray-200'
-              }`}
+              onClick={() => setShowEnvDialog(true)}
+              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+              title="View current environment variables and methods"
             >
-              {theme === 'dark' ? (
-                <SunIcon className="h-5 w-5" />
-              ) : (
-                <MoonIcon className="h-5 w-5" />
-              )}
+              View Environment
             </button>
             <button
               onClick={() => setShowSaveDialog(true)}
@@ -227,6 +318,8 @@ const NotebookComponent: React.FC = () => {
                 moveCellUp={() => moveCellUp(index)}
                 moveCellDown={() => moveCellDown(index)}
                 addContextToChat={addContextToChat}
+                isActive={cell.id === activeCellId}
+                setActiveCell={handleSetActiveCell}
               />
             ))}
           </div>
@@ -259,6 +352,62 @@ const NotebookComponent: React.FC = () => {
               >
                 Save
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showEnvDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50">
+          <div className={`${theme === 'dark' ? 'bg-[#242424]' : 'bg-gray-50'} p-6 rounded-lg border ${theme === 'dark' ? 'border-[#333333]' : 'border-gray-200'} shadow-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto`}>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">Current Environment</h2>
+              <button
+                onClick={() => setShowEnvDialog(false)}
+                className="p-2 hover:bg-opacity-80 rounded"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Methods Section */}
+              <div>
+                <h3 className="text-lg font-semibold mb-2 text-blue-500">Methods</h3>
+                <div className="grid grid-cols-2 gap-2">
+                  {notebookState.methods.map(method => (
+                    <div 
+                      key={method}
+                      className="p-2 bg-opacity-10 bg-blue-500 rounded"
+                    >
+                      {method}()
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Variables Sections */}
+              {Object.entries(groupVariables()).map(([groupName, variables]) => {
+                if (Object.keys(variables).length === 0) return null;
+                
+                return (
+                  <div key={groupName}>
+                    <h3 className="text-lg font-semibold mb-2 capitalize text-emerald-500">
+                      {groupName}
+                    </h3>
+                    <div className="grid grid-cols-1 gap-2">
+                      {Object.entries(variables).map(([key, value]) => (
+                        <div 
+                          key={key}
+                          className="p-2 bg-opacity-10 bg-emerald-500 rounded flex justify-between"
+                        >
+                          <span className="font-medium">{key}</span>
+                          <span className="text-gray-400">{value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
