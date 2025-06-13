@@ -10,11 +10,15 @@ import { executePythonInBrowser } from '@/utils/pyodideWorker';
 import { useTheme } from '@/contexts/ThemeContext';
 import { SunIcon, MoonIcon } from '@heroicons/react/24/outline';
 import { NotebookWebSocket } from '@/app/lib/websocket';
+import { ModalClient } from '@/app/lib/modal-client';
 import PackageManager from '@/components/PackageManager';
 import NotebookContext from '@/components/NotebookContext';
+import ModalSandbox from '@/components/ModalSandbox';
+import { useSandbox } from '@/contexts/SandboxContext';
 
 const NotebookComponent: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
+  const { sandboxId, setSandboxId } = useSandbox();
   const [cells, setCells] = useState<Cell[]>([{ 
     id: uuidv4(), 
     type: 'code', 
@@ -27,9 +31,11 @@ const NotebookComponent: React.FC = () => {
   const [newNotebookName, setNewNotebookName] = useState('');
   const [chatContext, setChatContext] = useState<string | null>(null);
   const [wsClient, setWsClient] = useState<NotebookWebSocket | null>(null);
+  const [modalClient, setModalClient] = useState<ModalClient | null>(null);
   const [executingCellId, setExecutingCellId] = useState<string | null>(null);
   const [packageManagerOpen, setPackageManagerOpen] = useState(false);
   const [showPackageManager, setShowPackageManager] = useState(false);
+  const [showSandbox, setShowSandbox] = useState(false);
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
   const [notebookContext, setNotebookContext] = useState<{
     methods: {
@@ -87,7 +93,8 @@ const NotebookComponent: React.FC = () => {
 
   useEffect(() => {
     const client = new NotebookWebSocket();
-    
+    const modalClient = new ModalClient();
+
     client.onExecutionResult((result) => {
       setCells(prevCells => 
         prevCells.map(cell => {
@@ -488,6 +495,7 @@ const NotebookComponent: React.FC = () => {
             }}
             onSelectNotebook={loadNotebook}
             onManagePackages={() => setShowPackageManager(true)}
+            onManageSandbox={() => setShowSandbox(true)}
             notebooks={notebooks}
             currentNotebook={currentNotebook}
             setShowContextDialog={setShowContextDialog}
@@ -560,13 +568,22 @@ const NotebookComponent: React.FC = () => {
       {showPackageManager && (
         <PackageManager
           onClose={() => setShowPackageManager(false)}
-          wsClient={wsClient}
         />
       )}
       {showContextDialog && (
         <NotebookContext
           context={notebookContext}
           onClose={() => setShowContextDialog(false)}
+        />
+      )}
+      {showSandbox && (
+        <ModalSandbox
+          onClose={() => setShowSandbox(false)}
+          onSandboxCreated={(id) => {
+            setSandboxId(id);
+            setShowSandbox(false);
+            setShowPackageManager(true);
+          }}
         />
       )}
     </div>

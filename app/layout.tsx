@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider } from '@/contexts/ThemeContext';
+import { SandboxProvider } from '@/contexts/SandboxContext';
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -30,7 +31,9 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased h-full flex flex-col`}
       >
         <ThemeProvider>
-          {children}
+          <SandboxProvider>
+            {children}
+          </SandboxProvider>
         </ThemeProvider>
       </body>
     </html>

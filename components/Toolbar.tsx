@@ -16,6 +16,7 @@ interface ToolbarProps {
   setShowContextDialog: (show: boolean) => void;
   notebook: Notebook;
   setShowSaveDialog: (show: boolean) => void;
+  onManageSandbox: () => void;
 }
 
 interface DropdownProps {
@@ -51,6 +52,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
   setShowContextDialog,
   notebook,
   setShowSaveDialog,
+  onManageSandbox,
 }) => {
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const { theme } = useTheme();
@@ -112,6 +114,7 @@ const Toolbar: React.FC<ToolbarProps> = ({
     ],
     environment: [
       { label: 'Manage Packages', action: onManagePackages },
+      { label: 'Manage Sandbox', action: onManageSandbox },
       { label: 'View Context', action: () => setShowContextDialog(true) },
       { label: 'Environment Details', action: () => {} },
     ],
